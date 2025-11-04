@@ -127,3 +127,13 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Large files and directories
+Checkpoints/
+CIFAR10/
+outputs/
+metrics_curves/
+*.tar.gz
+*.pt
+*.pth
+*.ckpt
