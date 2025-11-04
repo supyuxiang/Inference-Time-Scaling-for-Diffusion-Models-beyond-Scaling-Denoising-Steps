@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # DenoisingDiffusionProbabilityModel
 This may be the simplest implement of DDPM. I trained with CIFAR-10 dataset. The links of pretrain weight, which trained on CIFAR-10 are in the Issue 2. <br>
 <br>
@@ -21,3 +22,7 @@ Some generated images are showed below:
 * 2. DDPM + Classifier free guidence:
 
 ![Generated Images with condition](https://github.com/zoubohao/DenoisingDiffusionProbabilityModel-ddpm-/blob/main/SampledImgs/SampledGuidenceImgs.png)
+=======
+# Inference-Time-Scaling-for-Diffusion-Models-beyond-Scaling-Denoising-Steps
+复现paper《Inference-Time Scaling for Diffusion Models beyond Scaling Denoising Steps》
+>>>>>>> b833f3cfb56f42f33573ab70755ee6c326c9ba18
