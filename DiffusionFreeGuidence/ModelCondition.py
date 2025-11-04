@@ -203,7 +203,7 @@ class UNet(nn.Module):
         )
  
 
-    def forward(self, x, t, labels):
+    def forward(self, x, t, labels, return_representation=False):
         # Timestep embedding
         temb = self.time_embedding(t)
         cemb = self.cond_embedding(labels)
@@ -221,10 +221,18 @@ class UNet(nn.Module):
             if isinstance(layer, ResBlock):
                 h = torch.cat([h, hs.pop()], dim=1)
             h = layer(h, temb, cemb)
+        
+        # 保存最后一层表征（在tail层之前）
+        last_representation = h
+        
         h = self.tail(h)
 
         assert len(hs) == 0
-        return h
+        
+        if return_representation:
+            return h, last_representation
+        else:
+            return h
 
 
 if __name__ == '__main__':

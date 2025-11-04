@@ -1,0 +1,35 @@
+state: train
+epoch: 50
+batch_size: 1024
+lr: 0.0001
+grad_clip: 1.0
+multiplier: 2.0
+T: 1000
+beta_1: 0.0001
+beta_T: 0.02
+img_size: 32
+channel: 128
+channel_mult:
+- 1
+- 2
+- 3
+- 4
+attn:
+- 2
+num_res_blocks: 2
+dropout: 0.15
+device: cuda
+use_multi_gpu: true
+save_weight_dir: ./Checkpoints/ep50_bs1024_T1000_lr1e-4
+sampled_dir: ./SampledImgs/ep50_bs1024_T1000_lr1e-4
+metrics_save_dir: ./metrics_curves/ep50_bs1024_T1000_lr1e-4
+training_load_weight: null
+test_load_weight: ckpt_199_.pt
+sampledNoisyImgName: NoisyNoGuidenceImgs.png
+sampledImgName: SampledNoGuidenceImgs.png
+nrow: 8
+metric_interval: 10
+fid_num_real_samples: 5000
+clip_num_real_samples: 5000
+eval_batch_size: null
+num_workers: 4

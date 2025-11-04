@@ -1,0 +1,62 @@
+# Default configuration for DDPM training
+
+# Hydra configuration
+hydra:
+  output_subdir: null  # Disable Hydra output directory
+
+# Training state: "train" or "eval"
+state: train
+
+# Training parameters
+epoch: 10
+batch_size: 1024
+lr: 1e-4
+grad_clip: 1.0
+multiplier: 2.0
+
+# Diffusion parameters
+T: 1000
+beta_1: 1e-4
+beta_T: 0.02
+img_size: 256
+
+# Model architecture
+channel: 128
+channel_mult: [1, 2, 3, 4]
+attn: [2]
+num_res_blocks: 2
+dropout: 0.15
+
+# Device configuration
+device: "cuda"
+use_multi_gpu: true
+
+# Paths
+save_weight_dir: "./Checkpoints/ep50_bs1024_T1000_lr1e-4"
+sampled_dir: "./SampledImgs/"
+metrics_save_dir: "./metrics_curves/ep50_bs1024_T1000_lr1e-4"
+
+# Checkpoint settings
+training_load_weight: null
+test_load_weight: "ckpt_199_.pt"
+
+# Image saving
+sampledNoisyImgName: "NoisyNoGuidenceImgs.png"
+sampledImgName: "SampledNoGuidenceImgs.png"
+nrow: 8
+
+# Metrics evaluation
+metric_interval: 10
+eval_freq: 5  # Evaluate metrics every N epochs (default: 5, set higher to train faster)
+eval_metric_interval: 20  # Metric calculation interval during evaluation (larger = faster but less detailed)
+use_val_for_eval: true  # Use validation set for evaluation metrics (recommended). If false, uses training set
+precompute_real_features: false  # If true, pre-compute real features once. If false and use_val_for_eval=true, compute each epoch
+fid_num_real_samples: 5000  # Number of samples to use for FID calculation (sampling from val/train set)
+clip_num_real_samples: 5000  # Number of samples to use for CLIP Score calculation
+eval_batch_size: null  # null means use min(batch_size, 64) for speed
+model_save_freq: 5  # Save model every N epochs (default: 5, set higher to save less frequently)
+
+# Data loading
+num_workers: 4
+imagenet_root: "/data0/datasets/imagenet/imagenet"  # Path to ImageNet dataset root directory (should contain 'train' and 'val' subdirectories)
+

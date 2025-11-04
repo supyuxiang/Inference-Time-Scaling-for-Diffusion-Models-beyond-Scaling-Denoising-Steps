@@ -34,7 +34,7 @@ class GaussianDiffusionTrainer(nn.Module):
         self.register_buffer(
             'sqrt_one_minus_alphas_bar', torch.sqrt(1. - alphas_bar))
 
-    def forward(self, x_0, labels):
+    def forward(self, x_0, labels, return_representation=False):
         """
         Algorithm 1.
         """
@@ -42,8 +42,15 @@ class GaussianDiffusionTrainer(nn.Module):
         noise = torch.randn_like(x_0)
         x_t =   extract(self.sqrt_alphas_bar, t, x_0.shape) * x_0 + \
                 extract(self.sqrt_one_minus_alphas_bar, t, x_0.shape) * noise
-        loss = F.mse_loss(self.model(x_t, t, labels), noise, reduction='none')
-        return loss
+        
+        if return_representation:
+            predicted_noise, representation = self.model(x_t, t, labels, return_representation=True)
+            loss = F.mse_loss(predicted_noise, noise, reduction='none')
+            return loss, representation
+        else:
+            predicted_noise = self.model(x_t, t, labels)
+            loss = F.mse_loss(predicted_noise, noise, reduction='none')
+            return loss
 
 
 class GaussianDiffusionSampler(nn.Module):

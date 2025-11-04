@@ -3,6 +3,7 @@
 import os
 from typing import Dict
 import numpy as np
+import time
 
 import torch
 import torch.optim as optim
@@ -28,6 +29,10 @@ def train(modelConfig: Dict):
         ]))
     dataloader = DataLoader(
         dataset, batch_size=modelConfig["batch_size"], shuffle=True, num_workers=4, drop_last=True, pin_memory=True)
+    
+    # 创建表征保存目录
+    representation_dir = os.path.join(modelConfig["save_dir"], "representations")
+    os.makedirs(representation_dir, exist_ok=True)
 
     # model setup
     net_model = UNet(T=modelConfig["T"], num_labels=10, ch=modelConfig["channel"], ch_mult=modelConfig["channel_mult"],
@@ -46,9 +51,11 @@ def train(modelConfig: Dict):
         net_model, modelConfig["beta_1"], modelConfig["beta_T"], modelConfig["T"]).to(device)
 
     # start training
-    for e in range(modelConfig["epoch"]):
+    start_time = time.time()
+    for e in tqdm(range(modelConfig["epoch"]), desc="Training"):
+        epoch_representations = []  # 存储当前epoch的表征
         with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
-            for images, labels in tqdmDataLoader:
+            for batch_idx, (images, labels) in enumerate(tqdmDataLoader):
                 # train
                 b = images.shape[0]
                 optimizer.zero_grad()
@@ -56,7 +63,30 @@ def train(modelConfig: Dict):
                 labels = labels.to(device) + 1
                 if np.random.rand() < 0.1:
                     labels = torch.zeros_like(labels).to(device)
-                loss = trainer(x_0, labels).sum() / b ** 2.
+                
+                # 检查是否需要提取表征（每隔一定步数或特定epoch）
+                extract_representation = (modelConfig.get("extract_representation_freq", 0) > 0 and 
+                                        batch_idx % modelConfig.get("extract_representation_freq", 100) == 0)
+                
+                if extract_representation:
+                    loss, representation = trainer(x_0, labels, return_representation=True)
+                    # 保存表征到CPU并存储
+                    epoch_representations.append({
+                        'epoch': e,
+                        'batch_idx': batch_idx,
+                        'representation': representation.detach().cpu(),
+                        'labels': labels.detach().cpu(),
+                        'images': x_0.detach().cpu()
+                    })
+                    print('========================================')
+                    print(f"Extracted representation for batch {batch_idx}")
+                    print(f'epoch_representations: {epoch_representations[-1].get("representation")}')
+                    print(f'representation shape: {epoch_representations[-1].get("representation").shape}')
+                    print('========================================')
+                else:
+                    loss = trainer(x_0, labels)
+                
+                loss = loss.sum() / b ** 2.
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     net_model.parameters(), modelConfig["grad_clip"])
@@ -65,11 +95,24 @@ def train(modelConfig: Dict):
                     "epoch": e,
                     "loss: ": loss.item(),
                     "img shape: ": x_0.shape,
-                    "LR": optimizer.state_dict()['param_groups'][0]["lr"]
+                    "LR": optimizer.state_dict()['param_groups'][0]["lr"],
+                    "reprs": len(epoch_representations)
                 })
+        
+        # 保存当前epoch的表征
+        if epoch_representations:
+            representation_save_path = os.path.join(representation_dir, f'epoch_{e}_representations.pt')
+            os.makedirs(os.path.dirname(representation_save_path), exist_ok=True)
+            torch.save(epoch_representations, representation_save_path)
+            print(f"Saved {len(epoch_representations)} representations for epoch {e}")
+        
         warmUpScheduler.step()
-        torch.save(net_model.state_dict(), os.path.join(
-            modelConfig["save_dir"], 'ckpt_' + str(e) + "_.pt"))
+        # 获取当前学习率（避免警告）
+        current_lr = warmUpScheduler.get_last_lr()[0]
+        save_path = os.path.join(modelConfig["save_dir"], 'ckpt_' + str(e) + "_.pt")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        torch.save(net_model.state_dict(), save_path)
+        print(f"Epoch {e} completed, LR: {current_lr:.6f}, Loss: {loss.item():.6f}, Time: {time.time() - start_time:.2f}s")
 
 
 def eval(modelConfig: Dict):
