@@ -161,12 +161,30 @@ def load_checkpoint_state_dict(checkpoint_path: str, device: torch.device) -> di
 
 
 def detect_checkpoint_T(state_dict: dict) -> int:
-    """Detect checkpoint T from time_embedding weight shape"""
+    """
+    Detect checkpoint T from time_embedding weight shape.
+    
+    For old implementation (Embedding table): shape is [T, d_model]
+    For new functional implementation (Linear layer): shape is [dim, d_model], so we can't detect T
+    
+    Returns:
+        checkpoint_T if detected (old implementation), None otherwise (new functional implementation)
+    """
     time_emb_key = "time_embedding.timembedding.0.weight"
     if time_emb_key in state_dict:
-        checkpoint_T = state_dict[time_emb_key].shape[0]
-        print(f"Detected checkpoint T={checkpoint_T} from time_embedding shape")
-        return checkpoint_T
+        weight_shape = state_dict[time_emb_key].shape
+        # Old implementation: Embedding table with shape [T, d_model] where T could be 1000, 2000, etc.
+        # New implementation: Linear layer with shape [dim, d_model] where dim is typically 512 or similar
+        # If shape[0] is very large (> 1000), it's likely the old Embedding table
+        # If shape[0] is small (< 1000), it's likely the new Linear layer
+        if weight_shape[0] > 500:  # Likely old Embedding table (T >= 500)
+            checkpoint_T = weight_shape[0]
+            print(f"Detected checkpoint T={checkpoint_T} from old embedding table (shape {weight_shape})")
+            return checkpoint_T
+        else:
+            # New functional implementation - T is not stored in weights
+            print(f"Detected functional time embedding (Linear layer shape {weight_shape}) - T is not constrained")
+            return None
     return None
 
 

@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tqdm import tqdm
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torchvision.utils import save_image
@@ -474,7 +474,7 @@ def train(cfg: Dict):
         )
     
     # Use ImageFolder directly (simpler and more compatible)
-    dataset = ImageFolder(
+    full_dataset = ImageFolder(
         root=train_dir,
         transform=transforms.Compose([
             transforms.Resize((img_size, img_size)),
@@ -485,7 +485,29 @@ def train(cfg: Dict):
     )
     
     print(f"Loaded ImageNet dataset from {train_dir}")
-    print(f"Total samples: {len(dataset)}, Number of classes: {len(dataset.classes)}")
+    print(f"Total samples: {len(full_dataset)}, Number of classes: {len(full_dataset.classes)}")
+    
+    # Check if using full dataset or subset
+    use_full_dataset = cfg.get("use_full_dataset", False)  # Default to False (use subset)
+    
+    if use_full_dataset:
+        # Use full dataset
+        dataset = full_dataset
+        print(f"Using full dataset: {len(dataset)} samples")
+    else:
+        # Use subset of training data (shuffled)
+        train_subset_ratio = cfg.get("train_subset_ratio", 0.1)  # Default to 1/10
+        total_samples = len(full_dataset)
+        subset_size = int(total_samples * train_subset_ratio)
+        
+        # Create random indices for subset (shuffled)
+        indices = torch.randperm(total_samples).tolist()
+        subset_indices = indices[:subset_size]
+        
+        # Create subset dataset
+        dataset = Subset(full_dataset, subset_indices)
+        
+        print(f"Using subset: {subset_size}/{total_samples} samples ({train_subset_ratio*100:.1f}% of training data)")
     
     # Adjust batch size for multi-GPU (optional, can keep original batch size)
     effective_batch_size = cfg["batch_size"]
@@ -650,8 +672,15 @@ def train(cfg: Dict):
     
     # Create sampler for evaluation - use unwrapped model for sampling
     # Sampling is sequential and doesn't benefit from DataParallel
+    # Use inference_T if provided and not None, otherwise use training T
+    inference_T = cfg.get("inference_T") if cfg.get("inference_T") is not None else cfg["T"]
+    if inference_T != cfg["T"]:
+        print(f"Using separate inference T={inference_T} (training T={cfg['T']})")
+    else:
+        print(f"Using same T={cfg['T']} for training and inference")
+    
     sampler = GaussianDiffusionSampler(
-        model_for_saving, cfg["beta_1"], cfg["beta_T"], cfg["T"]).to(device)
+        model_for_saving, cfg["beta_1"], cfg["beta_T"], inference_T).to(device)
     
     # Create metrics save directory
     metrics_save_dir = cfg.get("metrics_save_dir", "./metrics_curves")
@@ -741,7 +770,7 @@ def train(cfg: Dict):
             # Sample images with metrics tracking
             eval_batch_size = cfg.get("eval_batch_size")
             if eval_batch_size is None:
-                eval_batch_size = min(cfg["batch_size"], 64)  # Limit eval batch size for speed
+                eval_batch_size = min(cfg["batch_size"], 32)  # Limit eval batch size for speed
             
             img_size = cfg.get("img_size", 256)  # ImageNet default size
             x_T_eval = torch.randn(size=[eval_batch_size, 3, 
@@ -794,8 +823,16 @@ def eval(cfg: Dict):
         model.load_state_dict(ckpt)
         print("model load weight done.")
         model.eval()
+        
+        # Use inference_T if provided and not None, otherwise use training T
+        inference_T = cfg.get("inference_T") if cfg.get("inference_T") is not None else cfg["T"]
+        if inference_T != cfg["T"]:
+            print(f"Using inference T={inference_T} (model was trained with T={cfg['T']})")
+        else:
+            print(f"Using same T={cfg['T']} for inference")
+        
         sampler = GaussianDiffusionSampler(
-            model, cfg["beta_1"], cfg["beta_T"], cfg["T"]).to(device)
+            model, cfg["beta_1"], cfg["beta_T"], inference_T).to(device)
         # Sampled from standard normal distribution
         img_size = cfg.get("img_size", 256)  # ImageNet default size
         noisyImage = torch.randn(

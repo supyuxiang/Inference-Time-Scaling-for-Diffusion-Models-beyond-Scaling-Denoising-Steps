@@ -9,9 +9,11 @@ import warnings
 
 try:
     from scipy import linalg
+    from scipy.linalg import LinAlgWarning
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
+    LinAlgWarning = None
     warnings.warn("scipy not available, using torch-only implementation for sqrtm")
 
 class FID:
@@ -156,18 +158,30 @@ class FID:
         diff_squared = torch.dot(diff, diff)
         
         # 计算协方差矩阵的迹部分
-        # 使用更稳定的方法计算矩阵平方根
-        # 添加小的正则化项以提高数值稳定性
-        offset = torch.eye(sigma1.shape[0], dtype=torch.float64, device=sigma1.device) * eps
-        covmean = self._sqrtm((sigma1 + offset) @ (sigma2 + offset))
+        # FID公式: sqrtm(sigma1 @ sigma2)
+        # 先计算矩阵乘积，然后计算平方根
+        covprod = sigma1 @ sigma2
+        
+        # 添加小的正则化项以提高数值稳定性（处理奇异矩阵）
+        # 直接添加正则化项，避免计算条件数时的SVD收敛问题
+        # 这不会显著改变FID值，但能提高数值稳定性
+        if covprod.shape[0] > 0:
+            # 直接添加小的正则化项，避免在奇异矩阵上计算条件数
+            # 这样可以避免 torch.linalg.cond 的 SVD 收敛警告
+            reg = torch.eye(covprod.shape[0], dtype=torch.float64, device=covprod.device) * eps
+            covprod = covprod + reg
+        
+        covmean = self._sqrtm(covprod)
         
         # 确保结果是实数（去除小的虚部）
         if torch.is_complex(covmean):
             covmean = covmean.real
-        if torch.any(torch.isnan(covmean)):
-            # 如果还有 NaN，使用更保守的近似
+        if torch.any(torch.isnan(covmean)) or torch.any(torch.isinf(covmean)):
+            # 如果还有 NaN 或 Inf，使用更保守的近似
+            # 使用对角矩阵近似
+            trace_val = torch.trace(covprod).clamp_min(eps)
             covmean = torch.eye(sigma1.shape[0], dtype=torch.float64, device=sigma1.device) * torch.sqrt(
-                torch.trace((sigma1 + offset) @ (sigma2 + offset)) / sigma1.shape[0]
+                trace_val / sigma1.shape[0]
             )
         
         trace_term = torch.trace(sigma1 + sigma2 - 2.0 * covmean)
@@ -176,27 +190,73 @@ class FID:
         return fid.item()
     
     def _sqrtm(self, matrix: torch.Tensor):
-        '''计算矩阵的平方根（使用特征分解方法）'''
+        '''计算矩阵的平方根（使用特征分解方法）
+        
+        对于对称矩阵 M，如果 M = Q @ Λ @ Q^T，则 sqrt(M) = Q @ sqrt(Λ) @ Q^T
+        其中 Q 是特征向量矩阵，Λ 是对角特征值矩阵
+        '''
         if SCIPY_AVAILABLE:
             # 使用 scipy 的 sqrtm（更稳定）
             matrix_np = matrix.cpu().double().numpy()
             try:
-                sqrtm_matrix = linalg.sqrtm(matrix_np)
-                if np.iscomplexobj(sqrtm_matrix):
-                    sqrtm_matrix = sqrtm_matrix.real
-                return torch.from_numpy(sqrtm_matrix).to(matrix.device)
-            except:
+                # 抑制 scipy 的警告（我们会在失败时回退到更稳定的方法）
+                import warnings
+                with warnings.catch_warnings():
+                    if LinAlgWarning is not None:
+                        warnings.filterwarnings('ignore', category=LinAlgWarning)
+                    sqrtm_matrix = linalg.sqrtm(matrix_np)
+                    if np.iscomplexobj(sqrtm_matrix):
+                        sqrtm_matrix = sqrtm_matrix.real
+                    # 检查结果是否有效
+                    if np.any(np.isnan(sqrtm_matrix)) or np.any(np.isinf(sqrtm_matrix)):
+                        raise ValueError("sqrtm result contains NaN or Inf")
+                    return torch.from_numpy(sqrtm_matrix).to(matrix.device)
+            except (ValueError, np.linalg.LinAlgError):
                 pass  # 回退到 torch 方法
         
         # 备用方法：特征分解（torch-only）
+        # 注意：协方差矩阵是对称的，所以应该使用 eigh 而不是 eig
         matrix = matrix.double()
-        eigenvalues, eigenvectors = torch.linalg.eig(matrix)
-        eigenvalues = eigenvalues.real.clamp_min(0.0)  # 确保非负
-        sqrt_eigenvalues = torch.sqrt(eigenvalues)
-        # 处理复数部分（虽然已经取 real，但为了类型一致）
-        eigenvectors = eigenvectors.real
-        sqrt_matrix = eigenvectors @ torch.diag(sqrt_eigenvalues) @ torch.linalg.pinv(eigenvectors)
-        return sqrt_matrix.real
+        
+        # 对于对称矩阵，使用 eigh 更稳定且保证特征向量正交
+        try:
+            eigenvalues, eigenvectors = torch.linalg.eigh(matrix)
+            # 确保特征值非负（理论上协方差矩阵应该是半正定的）
+            # 对于非常小的负特征值（数值误差），设为0
+            eigenvalues = eigenvalues.clamp_min(1e-10)  # 使用稍大的最小值避免sqrt(0)的问题
+            sqrt_eigenvalues = torch.sqrt(eigenvalues)
+            # 对于对称矩阵，特征向量是正交的，所以 Q^(-1) = Q^T
+            sqrt_matrix = eigenvectors @ torch.diag(sqrt_eigenvalues) @ eigenvectors.T
+            result = sqrt_matrix.real
+            
+            # 验证结果的有效性
+            if torch.any(torch.isnan(result)) or torch.any(torch.isinf(result)):
+                raise ValueError("sqrtm result contains NaN or Inf")
+            
+            return result
+        except (ValueError, RuntimeError):
+            # 如果 eigh 失败，回退到 eig（处理非对称情况）
+            try:
+                eigenvalues, eigenvectors = torch.linalg.eig(matrix)
+                eigenvalues = eigenvalues.real.clamp_min(1e-10)  # 确保非负
+                sqrt_eigenvalues = torch.sqrt(eigenvalues)
+                eigenvectors = eigenvectors.real
+                # 使用伪逆（对于非对称矩阵）
+                sqrt_matrix = eigenvectors @ torch.diag(sqrt_eigenvalues) @ torch.linalg.pinv(eigenvectors)
+                result = sqrt_matrix.real
+                
+                # 验证结果的有效性
+                if torch.any(torch.isnan(result)) or torch.any(torch.isinf(result)):
+                    raise ValueError("sqrtm result contains NaN or Inf")
+                
+                return result
+            except:
+                # 最后的回退：使用对角矩阵近似
+                # 这对于奇异矩阵是一个合理的近似
+                trace_val = torch.trace(matrix).clamp_min(1e-10)
+                return torch.eye(matrix.shape[0], dtype=torch.float64, device=matrix.device) * torch.sqrt(
+                    trace_val / matrix.shape[0]
+                )
     
     def calculate_activation_statistics(self, features: torch.Tensor):
         '''
@@ -206,25 +266,27 @@ class FID:
             features: 特征张量 (N, dim)
             
         Returns:
-            mu: 均值向量
-            sigma: 协方差矩阵
+            mu: 均值向量 (float64，与calculate_frechet_distance兼容)
+            sigma: 协方差矩阵 (float64，与calculate_frechet_distance兼容)
         '''
         if len(features) == 1:
             warnings.warn("Only one sample provided for statistics calculation. "
                          "Covariance matrix will be zero.")
         
-        mu = torch.mean(features, dim=0)
+        # 转换为float64以提高数值稳定性（与calculate_frechet_distance一致）
+        features_f64 = features.to(torch.float64)
+        mu = torch.mean(features_f64, dim=0)
         
         if len(features) > 1:
             # FID 标准实现使用有偏估计（除以 N，而不是 N-1）
             # features shape: (N, dim)，需要转置为 (dim, N) 给 torch.cov
-            sigma = torch.cov(features.T, correction=0)  # correction=0 表示除以 N
+            sigma = torch.cov(features_f64.T, correction=0)  # correction=0 表示除以 N
         else:
             # 单样本时协方差为零，使用小的正则化项
             sigma = torch.zeros((features.shape[1], features.shape[1]), 
-                               dtype=features.dtype, device=features.device)
+                               dtype=torch.float64, device=features.device)
             sigma = sigma + 1e-6 * torch.eye(features.shape[1], 
-                                            dtype=features.dtype, device=features.device)
+                                            dtype=torch.float64, device=features.device)
             
         return mu, sigma
     
@@ -430,8 +492,10 @@ class CLIPScore:
             
             # 提取特征
             image_features = self.clip_model.encode_image(processed_tensor)
-            # L2 normalize
-            image_features = image_features / image_features.norm(dim=1, keepdim=True)
+            # L2 normalize（添加数值稳定性保护）
+            feature_norm = image_features.norm(dim=1, keepdim=True)
+            feature_norm = feature_norm.clamp_min(1e-8)  # 避免除以零
+            image_features = image_features / feature_norm
         
         return image_features
     

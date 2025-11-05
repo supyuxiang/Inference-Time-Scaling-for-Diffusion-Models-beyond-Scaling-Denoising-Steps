@@ -15,7 +15,7 @@ fine_tune_time_embedding: true  # Only fine-tune time_embedding layers
 
 # Original training parameters (for reference, will be overridden)
 epoch: 5  # Will be overridden by fine_tune_epochs
-batch_size: 64  # Smaller batch size for fine-tuning is fine
+batch_size: 10   # Smaller batch size for fine-tuning is fine
 lr: 1e-4  # Base learning rate (fine_tune_lr will be used instead)
 grad_clip: 1.0
 multiplier: 2.0

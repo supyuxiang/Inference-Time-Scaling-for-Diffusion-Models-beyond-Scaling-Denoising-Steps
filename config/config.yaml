@@ -15,7 +15,8 @@ grad_clip: 1.0
 multiplier: 2.0
 
 # Diffusion parameters
-T: 1000
+T: 1000  # Training T: number of diffusion steps for training
+inference_T: null  # Inference T: number of diffusion steps for sampling/evaluation (null means use training T)
 beta_1: 1e-4
 beta_T: 0.02
 img_size: 256
@@ -53,10 +54,12 @@ use_val_for_eval: true  # Use validation set for evaluation metrics (recommended
 precompute_real_features: false  # If true, pre-compute real features once. If false and use_val_for_eval=true, compute each epoch
 fid_num_real_samples: 5000  # Number of samples to use for FID calculation (sampling from val/train set)
 clip_num_real_samples: 5000  # Number of samples to use for CLIP Score calculation
-eval_batch_size: null  # null means use min(batch_size, 64) for speed
+eval_batch_size: 32  # null means use min(batch_size, 64) for speed
 model_save_freq: 2  # Save model every N epochs (default: 5, set higher to save less frequently)
 
 # Data loading
 num_workers: 4
 imagenet_root: "/data0/datasets/imagenet/imagenet"  # Path to ImageNet dataset root directory (should contain 'train' and 'val' subdirectories)
+use_full_dataset: false  # If true, use full training dataset. If false, use subset
+train_subset_ratio: 0.1  # Ratio of training data to use when use_full_dataset=false (e.g., 0.1 means 10% of data)
 

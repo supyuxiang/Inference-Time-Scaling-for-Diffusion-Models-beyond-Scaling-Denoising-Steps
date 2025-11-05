@@ -85,19 +85,20 @@ class GaussianDiffusionSampler(nn.Module):
         """
         Algorithm 2.
         """
-        x_t = x_T
-        for time_step in reversed(range(self.T)):
-            print(time_step)
-            t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
-            mean, var= self.p_mean_variance(x_t=x_t, t=t)
-            # no noise when t == 0
-            if time_step > 0:
-                noise = torch.randn_like(x_t)
-            else:
-                noise = 0
-            x_t = mean + torch.sqrt(var) * noise
-            assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
-        x_0 = x_t
-        return torch.clip(x_0, -1, 1)   
+        with torch.no_grad():  # 采样过程不需要梯度计算
+            x_t = x_T
+            for time_step in reversed(range(self.T)):
+                print(time_step)
+                t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
+                mean, var= self.p_mean_variance(x_t=x_t, t=t)
+                # no noise when t == 0
+                if time_step > 0:
+                    noise = torch.randn_like(x_t)
+                else:
+                    noise = 0
+                x_t = mean + torch.sqrt(var) * noise
+                assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
+            x_0 = x_t
+            return torch.clip(x_0, -1, 1)   
 
 

@@ -14,19 +14,28 @@ class Swish(nn.Module):
 
 class TimeEmbedding(nn.Module):
     def __init__(self, T, d_model, dim):
+        """
+        Time embedding module for diffusion models.
+        
+        Note: T parameter is kept for backward compatibility but is no longer used.
+        The embedding is now computed functionally for any time step value.
+        
+        Args:
+            T: Maximum timesteps (kept for compatibility, not used)
+            d_model: Embedding dimension (must be even)
+            dim: Output dimension after linear projection
+        """
         assert d_model % 2 == 0
         super().__init__()
-        emb = torch.arange(0, d_model, step=2) / d_model * math.log(10000)
-        emb = torch.exp(-emb)
-        pos = torch.arange(T).float()
-        emb = pos[:, None] * emb[None, :]
-        assert list(emb.shape) == [T, d_model // 2]
-        emb = torch.stack([torch.sin(emb), torch.cos(emb)], dim=-1)
-        assert list(emb.shape) == [T, d_model // 2, 2]
-        emb = emb.view(T, d_model)
-
+        self.d_model = d_model
+        
+        # Pre-compute frequency coefficients (independent of T)
+        # These are constants that define the sinusoidal frequencies
+        emb = torch.arange(0, d_model, step=2).float() / d_model * math.log(10000)
+        self.register_buffer('freq_coeffs', torch.exp(-emb))  # Shape: [d_model // 2]
+        
+        # MLP to project time embedding to desired dimension
         self.timembedding = nn.Sequential(
-            nn.Embedding.from_pretrained(emb),
             nn.Linear(d_model, dim),
             Swish(),
             nn.Linear(dim, dim),
@@ -40,7 +49,47 @@ class TimeEmbedding(nn.Module):
                 init.zeros_(module.bias)
 
     def forward(self, t):
-        emb = self.timembedding(t)
+        """
+        Compute time embedding for any time step value.
+        
+        Args:
+            t: Time step indices, shape [B], values can be any integers
+        
+        Returns:
+            Time embedding, shape [B, dim]
+        """
+        # Ensure t is 1D tensor with shape [B]
+        if t.dim() > 1:
+            # Flatten if multi-dimensional (shouldn't happen, but handle it)
+            t = t.flatten()
+        
+        # Get batch size
+        B = t.shape[0]
+        
+        # Convert t to float
+        t = t.float()  # [B]
+        
+        # Compute sinusoidal positional encoding functionally
+        # t: [B] -> [B, 1]
+        # freq_coeffs: [d_model // 2] -> broadcast to [B, d_model // 2]
+        t_expanded = t.unsqueeze(-1)  # [B, 1]
+        emb = t_expanded * self.freq_coeffs.unsqueeze(0)  # [B, d_model // 2]
+        
+        # Apply sin and cos
+        emb_sin = torch.sin(emb)  # [B, d_model // 2]
+        emb_cos = torch.cos(emb)   # [B, d_model // 2]
+        
+        # Interleave sin and cos: [sin0, cos0, sin1, cos1, ...]
+        # Stack along new dimension: [B, d_model // 2, 2]
+        emb = torch.stack([emb_sin, emb_cos], dim=-1)  # [B, d_model // 2, 2]
+        
+        # Reshape to [B, d_model]
+        # Important: use reshape instead of view to ensure contiguity
+        emb = emb.reshape(B, self.d_model)  # [B, d_model]
+        
+        # Project through MLP
+        emb = self.timembedding(emb)  # [B, dim]
+        
         return emb
 
 
