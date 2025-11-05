@@ -1,0 +1,75 @@
+# Configuration for fine-tuning extended T model
+
+# Hydra configuration
+hydra:
+  output_subdir: null  # Disable Hydra output directory
+
+# Training state
+state: train
+
+# Fine-tuning parameters
+fine_tune_mode: true
+fine_tune_epochs: 5  # Number of epochs for fine-tuning (typically 3-10 is enough)
+fine_tune_lr: 1e-5  # Learning rate for fine-tuning (usually 10x smaller than training lr)
+fine_tune_time_embedding: true  # Only fine-tune time_embedding layers
+
+# Original training parameters (for reference, will be overridden)
+epoch: 5  # Will be overridden by fine_tune_epochs
+batch_size: 64  # Smaller batch size for fine-tuning is fine
+lr: 1e-4  # Base learning rate (fine_tune_lr will be used instead)
+grad_clip: 1.0
+multiplier: 2.0
+
+# Diffusion parameters
+# IMPORTANT: Set T to your target value (e.g., 2000)
+# The checkpoint should have T=1000, and we'll extend it to T=2000
+T: 2000
+beta_1: 1e-4
+beta_T: 0.02
+img_size: 256
+
+# Model architecture (MUST match checkpoint)
+channel: 128
+channel_mult: [1, 2, 3, 4]
+attn: [2]
+num_res_blocks: 2
+dropout: 0.15
+
+# Device configuration
+device: "cuda"
+use_multi_gpu: true
+device_ids: [0, 1]  # Will be remapped if CUDA_VISIBLE_DEVICES is set
+
+# Paths
+# Source checkpoint (the one trained with T=1000)
+checkpoint_path: "/home/yxfeng/project2/DenoisingDiffusionProbabilityModel-ddpm-/Checkpoints/ep15_bs40_T1000_lr1e-4/ckpt_0_.pt"
+# Or use training_load_weight if loading from save_weight_dir
+training_load_weight: null  # Set to "ckpt_0_.pt" if using save_weight_dir
+
+# Output directory for fine-tuned checkpoints
+save_weight_dir: "./Checkpoints/fine_tuned_T2000"
+sampled_dir: "./SampledImgs/fine_tuned_T2000/"
+metrics_save_dir: "./metrics_curves/fine_tuned_T2000"
+
+# Checkpoint saving
+model_save_freq: 1  # Save every epoch during fine-tuning
+
+# Image saving
+sampledNoisyImgName: "NoisyNoGuidenceImgs.png"
+sampledImgName: "SampledNoGuidenceImgs.png"
+nrow: 8
+
+# Metrics evaluation (optional during fine-tuning, can be disabled to speed up)
+metric_interval: 10
+eval_freq: 999  # Disable evaluation during fine-tuning (set to 999 to skip)
+eval_metric_interval: 20
+use_val_for_eval: true
+precompute_real_features: false
+fid_num_real_samples: 5000
+clip_num_real_samples: 5000
+eval_batch_size: null
+
+# Data loading
+num_workers: 4
+imagenet_root: "/data0/datasets/imagenet/imagenet"
+

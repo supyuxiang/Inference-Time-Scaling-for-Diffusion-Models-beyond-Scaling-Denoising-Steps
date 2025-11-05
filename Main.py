@@ -8,6 +8,7 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 
 
+
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg: DictConfig) -> None:
     """
@@ -17,6 +18,20 @@ def main(cfg: DictConfig) -> None:
         python Main.py                          # Use default config
         python Main.py epoch=100 batch_size=512  # Override specific params
         python Main.py model_config.epoch=100    # Nested override (legacy format)
+    """
+    
+    modelConfig = load_config(cfg)
+    # Run training or evaluation
+    if modelConfig["state"] == "train":
+        train(modelConfig)
+    else:
+        from Diffusion.Train import eval as eval_func
+        eval_func(modelConfig)
+
+
+def load_config(cfg:DictConfig) -> dict:
+    """
+    Load configuration from yaml file
     """
     # Handle legacy nested config format (model_config.xxx)
     # This allows scripts to use model_config.xxx format
@@ -51,13 +66,7 @@ def main(cfg: DictConfig) -> None:
     for key, value in sorted(modelConfig.items()):
         print(f"  {key}: {value}")
     print("=" * 80)
-    
-    # Run training or evaluation
-    if modelConfig["state"] == "train":
-        train(modelConfig)
-    else:
-        from Diffusion.Train import eval as eval_func
-        eval_func(modelConfig)
+    return modelConfig
 
 
 if __name__ == '__main__':

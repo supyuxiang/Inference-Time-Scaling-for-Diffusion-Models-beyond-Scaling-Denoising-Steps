@@ -1,0 +1,65 @@
+# Configuration for inference with metrics tracking
+
+# Hydra configuration
+hydra:
+  output_subdir: null  # Disable Hydra output directory
+
+# Model checkpoint path
+checkpoint_path: "/home/yxfeng/project2/DenoisingDiffusionProbabilityModel-ddpm-/Checkpoints/ep15_bs40_T1000_lr1e-4/ckpt_0_.pt"
+
+# Diffusion parameters
+# T: Number of diffusion steps
+#   - If T matches checkpoint: all weights loaded normally
+#   - If T > checkpoint T: time_embedding will be extended for larger T
+#     (useful for more refined generation, but may affect quality without fine-tuning)
+#   - If T < checkpoint T: NOT recommended (will truncate embedding)
+# Checkpoint path indicates T=1000 (ep15_bs40_T1000_lr1e-4)
+# You can set T=2000 or higher for more diffusion steps (slower but potentially better quality)
+T: 3000
+beta_1: 1e-4
+beta_T: 0.02
+img_size: 256
+
+# Time embedding strategy when T mismatches checkpoint
+# Options:
+#   - "interpolate": Extend embedding using interpolation (preserves learned patterns, recommended)
+#   - "reinit": Complete reinitialization (may degrade quality)
+time_embedding_strategy: "interpolate"
+
+# Fine-tuning options for time_embedding (when T > checkpoint T)
+# If true, time_embedding linear layers will be trainable (for fine-tuning)
+# If false, they will be frozen (for inference only)
+fine_tune_time_embedding: false  # Set to true if you plan to fine-tune
+
+# Model architecture (must match training config)
+channel: 128
+channel_mult: [1, 2, 3, 4]
+attn: [2]
+num_res_blocks: 2
+dropout: 0.15
+
+# Device configuration
+device: "cuda"
+use_multi_gpu: true  # Enable DataParallel
+# device_ids: When CUDA_VISIBLE_DEVICES is set, use [0, 1, ...] (remapped IDs)
+#            When CUDA_VISIBLE_DEVICES is NOT set, use actual GPU IDs like [4, 5]
+device_ids: [0, 1]  # Use first 2 GPUs (will be remapped if CUDA_VISIBLE_DEVICES is set)
+
+# Inference parameters
+batch_size: 64  # Batch size for generation
+metric_interval: 30  # Calculate metrics every N steps
+
+# Dataset path for computing real features (for FID and CLIP Score)
+imagenet_root: "/data0/datasets/imagenet/imagenet"
+use_val_for_eval: true  # Use validation set for real features
+fid_num_real_samples: 5000  # Number of real samples for FID calculation
+clip_num_real_samples: 5000  # Number of real samples for CLIP Score calculation
+
+# Output paths
+output_dir: "/home/yxfeng/project2/DenoisingDiffusionProbabilityModel-ddpm-/outputs/inference_results"
+metrics_save_dir: "/home/yxfeng/project2/DenoisingDiffusionProbabilityModel-ddpm-/metrics_curves/inference_metrics_curves"
+sampled_images_save_dir: "/home/yxfeng/project2/DenoisingDiffusionProbabilityModel-ddpm-/SampledImgs/inference_results"
+
+# Image saving
+nrow: 8  # Number of images per row in saved image grid
+

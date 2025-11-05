@@ -59,8 +59,14 @@ def sample_with_metrics_tracking(
     x_t = x_T
     T = sampler.T
     
+    # Create progress bar with detailed information
+    time_steps = list(reversed(range(T)))
+    pbar = tqdm(time_steps, desc="🎨 Sampling", dynamic_ncols=True, 
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+                ncols=120)
+    
     with torch.no_grad():
-        for time_step in tqdm(reversed(range(T)), desc="Sampling"):
+        for idx, time_step in enumerate(pbar):
             t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
             mean, var = sampler.p_mean_variance(x_t=x_t, t=t)
             
@@ -104,14 +110,14 @@ def sample_with_metrics_tracking(
                         mu_real, sigma_real, mu_fake, sigma_fake
                     )
                 except Exception as e:
-                    print(f"Warning: FID calculation failed at step {time_step}: {e}")
+                    print(f"\nWarning: FID calculation failed at step {time_step}: {e}")
                 
                 try:
                     # 计算 IS
                     is_mean, is_std = is_calculator.compute_is(x_denormalized)
                     is_value = is_mean
                 except Exception as e:
-                    print(f"Warning: IS calculation failed at step {time_step}: {e}")
+                    print(f"\nWarning: IS calculation failed at step {time_step}: {e}")
                 
                 try:
                     # 计算 CLIP Score
@@ -123,12 +129,38 @@ def sample_with_metrics_tracking(
                     else:
                         clip_value = float('nan')
                 except Exception as e:
-                    print(f"Warning: CLIP Score calculation failed at step {time_step}: {e}")
+                    print(f"\nWarning: CLIP Score calculation failed at step {time_step}: {e}")
                     clip_value = float('nan')
                 
+                # Record metrics with both time_step and denoising_progress
+                # time_step: actual diffusion timestep (T-1 down to 0)
+                # denoising_progress: number of denoising steps completed (0 to T)
+                denoising_progress = T - time_step
                 metric_history.append((time_step, fid_value, is_value, clip_value))
-                if time_step % (metric_interval * 5) == 0:
-                    print(f"Step {time_step}: FID={fid_value:.2f}, IS={is_value:.2f}, CLIP={clip_value:.4f}")
+                
+                # Update progress bar with metrics
+                progress_pct = (denoising_progress / T) * 100
+                
+                # Format metrics for display
+                fid_display = f"{fid_value:.2f}" if not (isinstance(fid_value, float) and np.isnan(fid_value)) else "N/A"
+                is_display = f"{is_value:.2f}" if not (isinstance(is_value, float) and np.isnan(is_value)) else "N/A"
+                clip_display = f"{clip_value:.4f}" if (clip_calculator is not None and not (isinstance(clip_value, float) and np.isnan(clip_value))) else "N/A"
+                
+                # Update progress bar postfix
+                # Show both: denoising progress (more intuitive) and time_step (for debugging)
+                postfix_dict = {
+                    'Progress': f'{denoising_progress}/{T}',
+                    't': f'{time_step}',
+                    'FID': fid_display,
+                    'IS': is_display,
+                    'CLIP': clip_display,
+                }
+                pbar.set_postfix(postfix_dict)
+                
+                # Print detailed metrics every 5 intervals (less frequent prints)
+                # Display denoising progress instead of time_step for better intuition
+                if time_step % (metric_interval * 5) == 0 or time_step == 0:
+                    print(f"\nDenoising Progress: {denoising_progress}/{T} (t={time_step}, {progress_pct:.1f}%): FID={fid_display}, IS={is_display}, CLIP={clip_display}")
         
         x_0 = torch.clamp(x_t, -1, 1)
         return x_0, metric_history
@@ -286,11 +318,24 @@ def plot_metrics_curves(metric_history: List[Tuple[int, float, float, float]], e
         metric_history: [(timestep, fid_value, is_value, clip_value), ...]
         epoch: 当前 epoch
         save_dir: 保存目录
+    
+    Note:
+        metric_history中的timestep是从T-1递减到0的，我们将其转换为去噪进度（0到T）以便更直观
     """
-    steps = [t for t, _, _, _ in metric_history]
+    timesteps = [t for t, _, _, _ in metric_history]
     fids = [f for _, f, _, _ in metric_history]
     iss = [i for _, _, i, _ in metric_history]
     clips = [c for _, _, _, c in metric_history]
+    
+    # 从timestep计算去噪进度和总步数T
+    # timestep从T-1递减到0，所以T = max(timestep) + 1
+    if len(timesteps) > 0:
+        T = max(timesteps) + 1
+        # 去噪进度 = T - timestep (0表示刚开始，T表示完成)
+        denoising_progress = [T - t for t in timesteps]
+    else:
+        T = 0
+        denoising_progress = []
     
     # 过滤掉 NaN 值（至少有一个有效值即可）
     valid_indices = [
@@ -306,18 +351,18 @@ def plot_metrics_curves(metric_history: List[Tuple[int, float, float, float]], e
     
     os.makedirs(save_dir, exist_ok=True)
     
-    # 绘制 FID 曲线
+    # 绘制 FID 曲线（使用去噪进度作为x轴，更直观）
     fid_indices = [i for i in valid_indices if not (isinstance(fids[i], float) and np.isnan(fids[i]))]
     if len(fid_indices) > 0:
-        steps_fid = [steps[i] for i in fid_indices]
+        progress_fid = [denoising_progress[i] for i in fid_indices]
         fids_valid = [fids[i] for i in fid_indices]
         plt.figure(figsize=(10, 6))
-        plt.plot(steps_fid, fids_valid, marker='o', linestyle='-', linewidth=2, markersize=4, color='blue')
-        plt.xlabel('Diffusion Timestep (reverse)', fontsize=12)
+        plt.plot(progress_fid, fids_valid, marker='o', linestyle='-', linewidth=2, markersize=4, color='blue')
+        plt.xlabel('Denoising Progress (steps completed)', fontsize=12)
         plt.ylabel('FID Score', fontsize=12)
-        plt.title(f'FID vs Diffusion Steps - Epoch {epoch}', fontsize=14)
+        plt.title(f'FID vs Denoising Progress - Epoch {epoch}\n(Lower is better)', fontsize=14)
         plt.grid(True, alpha=0.3)
-        plt.gca().invert_xaxis()  # 反转 x 轴，使得 t=0 在右边（去噪完成）
+        # x轴从0到T，不需要反转
         save_path = os.path.join(save_dir, f'fid_curve_epoch_{epoch}.png')
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()
@@ -326,15 +371,14 @@ def plot_metrics_curves(metric_history: List[Tuple[int, float, float, float]], e
     # 绘制 IS 曲线
     is_indices = [i for i in valid_indices if not (isinstance(iss[i], float) and np.isnan(iss[i]))]
     if len(is_indices) > 0:
-        steps_is = [steps[i] for i in is_indices]
+        progress_is = [denoising_progress[i] for i in is_indices]
         iss_valid = [iss[i] for i in is_indices]
         plt.figure(figsize=(10, 6))
-        plt.plot(steps_is, iss_valid, marker='s', linestyle='-', linewidth=2, markersize=4, color='green')
-        plt.xlabel('Diffusion Timestep (reverse)', fontsize=12)
+        plt.plot(progress_is, iss_valid, marker='s', linestyle='-', linewidth=2, markersize=4, color='green')
+        plt.xlabel('Denoising Progress (steps completed)', fontsize=12)
         plt.ylabel('IS Score', fontsize=12)
-        plt.title(f'IS vs Diffusion Steps - Epoch {epoch}', fontsize=14)
+        plt.title(f'IS vs Denoising Progress - Epoch {epoch}\n(Higher is better)', fontsize=14)
         plt.grid(True, alpha=0.3)
-        plt.gca().invert_xaxis()
         save_path = os.path.join(save_dir, f'is_curve_epoch_{epoch}.png')
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()
@@ -343,15 +387,14 @@ def plot_metrics_curves(metric_history: List[Tuple[int, float, float, float]], e
     # 绘制 CLIP Score 曲线
     clip_indices = [i for i in valid_indices if not (isinstance(clips[i], float) and np.isnan(clips[i]))]
     if len(clip_indices) > 0:
-        steps_clip = [steps[i] for i in clip_indices]
+        progress_clip = [denoising_progress[i] for i in clip_indices]
         clips_valid = [clips[i] for i in clip_indices]
         plt.figure(figsize=(10, 6))
-        plt.plot(steps_clip, clips_valid, marker='^', linestyle='-', linewidth=2, markersize=4, color='red')
-        plt.xlabel('Diffusion Timestep (reverse)', fontsize=12)
+        plt.plot(progress_clip, clips_valid, marker='^', linestyle='-', linewidth=2, markersize=4, color='red')
+        plt.xlabel('Denoising Progress (steps completed)', fontsize=12)
         plt.ylabel('CLIP Score', fontsize=12)
-        plt.title(f'CLIP Score vs Diffusion Steps - Epoch {epoch}', fontsize=14)
+        plt.title(f'CLIP Score vs Denoising Progress - Epoch {epoch}\n(Higher is better)', fontsize=14)
         plt.grid(True, alpha=0.3)
-        plt.gca().invert_xaxis()
         save_path = os.path.join(save_dir, f'clip_curve_epoch_{epoch}.png')
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()

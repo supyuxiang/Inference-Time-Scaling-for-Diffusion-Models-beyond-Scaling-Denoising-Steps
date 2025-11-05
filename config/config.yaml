@@ -54,7 +54,7 @@ precompute_real_features: false  # If true, pre-compute real features once. If f
 fid_num_real_samples: 5000  # Number of samples to use for FID calculation (sampling from val/train set)
 clip_num_real_samples: 5000  # Number of samples to use for CLIP Score calculation
 eval_batch_size: null  # null means use min(batch_size, 64) for speed
-model_save_freq: 5  # Save model every N epochs (default: 5, set higher to save less frequently)
+model_save_freq: 2  # Save model every N epochs (default: 5, set higher to save less frequently)
 
 # Data loading
 num_workers: 4
